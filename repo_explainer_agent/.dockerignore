@@ -1,0 +1,11 @@
+# never copy secrets or local junk into the image
+.env
+.env.*
+!.env.example
+.adk/
+__pycache__/
+*.pyc
+Dockerfile
+.dockerignore
+.gcloudignore
+README.md

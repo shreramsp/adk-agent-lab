@@ -78,7 +78,7 @@ pattern_synthesizer = LlmAgent(
     "only evidence from the reports and never invent facts or URLs.",
     output_schema=PatternReport,
     output_key="patterns",
-    # [Step 12] swap Google's temporary redirect links for the real article URLs
+    # swap Google's temporary redirect links for the real article URLs
     after_agent_callback=resolve_source_urls("patterns", "patterns", "evidence_urls"),
 )
 

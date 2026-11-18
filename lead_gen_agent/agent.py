@@ -24,14 +24,14 @@ lead_gen_boss = LlmAgent(
     "Phase 2: only after the user says yes, call lead_generation with a short request. "
     "Then present the ranked leads as a markdown table with columns Rank, Company, "
     "Country, Score, Matched patterns, followed by the summary and the source links. "
-    # [Step 12] the boss now also saves a downloadable CSV
+    # last step: save the ranked leads as a downloadable CSV
     "Finally call export_leads_csv and tell the user leads.csv is in the Artifacts tab.\n"
     "If the industry or country is missing, ask for it first. Never call lead_generation "
     "before pattern_discovery has run. Only use facts from the tool results.",
     tools=[AgentTool(agent=pattern_discovery), AgentTool(agent=lead_generation), export_leads_csv],
 )
 
-# [Step 12] SHOW_FLOW switch (set in .env, then restart adk web) - for demos and the video:
+# SHOW_FLOW switch (set in .env, then restart adk web) - for demos and the video:
 #   (unset)            -> the boss: chats, asks to confirm, but hides the inner agents
 #   pattern_discovery  -> run pipeline 1 directly; adk web draws all its inner agents
 #   lead_generation    -> pipeline 2 directly (only works after pattern_discovery in the same session)

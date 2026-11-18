@@ -10,7 +10,7 @@ from google.adk.agents.callback_context import CallbackContext
 from google.adk.tools import ToolContext
 from google.genai import types
 
-# [Step 12] Google Search grounding returns temporary redirect links with this prefix
+# Google Search grounding returns temporary redirect links with this prefix
 _REDIRECT_PREFIX = "https://vertexaisearch.cloud.google.com/grounding-api-redirect/"
 
 
@@ -33,7 +33,7 @@ async def _resolve_all(urls: list[str]) -> list[str]:
     return list(dict.fromkeys(resolved))  # drop duplicates, keep order
 
 
-# [Step 12] after_agent_callback factory: runs AFTER an agent finishes, rewrites its saved
+# after_agent_callback factory: runs AFTER an agent finishes, rewrites its saved
 # report with real URLs, and returns the cleaned JSON as the agent's final message
 # (so AgentTool hands the boss the clean version, not the redirect links).
 def resolve_source_urls(output_key: str, list_key: str, url_field: str):
@@ -51,7 +51,7 @@ def resolve_source_urls(output_key: str, list_key: str, url_field: str):
     return callback
 
 
-# [Step 12] a normal function tool for the boss: turns state["lead_report"] into a CSV artifact
+# a normal function tool for the boss: turns state["lead_report"] into a CSV artifact
 async def export_leads_csv(tool_context: ToolContext) -> dict:
     """Saves the latest ranked lead report as leads.csv, a file the user can download."""
     report = tool_context.state.get("lead_report")

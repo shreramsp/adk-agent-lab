@@ -7,7 +7,7 @@ from .config import MODEL
 from .schemas import LeadList, LeadReport
 from .tools import resolve_source_urls
 
-# [Step 12] spells out what "not invested yet" means: factories, plants and JVs all count as investing
+# spells out what "not invested yet" means: factories, plants and JVs all count as investing
 _NOT_INVESTED = (
     "has NOT announced, started building, or operated a factory, plant, or other major "
     "facility in the target country, directly or through a joint venture or licensing "
@@ -17,7 +17,7 @@ _NOT_INVESTED = (
 lead_finder = LlmAgent(
     name="lead_finder",
     model=MODEL,
-    # [Step 12] the big players have usually invested already, so look at mid-sized/emerging
+    # the big players have usually invested already, so look at mid-sized/emerging
     # companies, self-check each one, and return extras so the validator has room to filter
     instruction="Research request: {intent}\nSuccess patterns: {patterns}\n"
     "Companies already studied (never list these): {companies}\n"
@@ -44,7 +44,7 @@ lead_formatter = LlmAgent(
 lead_validator = LlmAgent(
     name="lead_validator",
     model=MODEL,
-    # [Step 12] two plain yes/no questions + an explicit rule (the double negative confused the model)
+    # two plain yes/no questions + an explicit rule (the double negative confused the model)
     instruction="Research request: {intent}\nLeads: {leads}\n"
     "For each lead, use Google Search to answer two yes/no questions:\n"
     "Q1: Is the company headquartered outside the target country?\n"
@@ -81,7 +81,7 @@ parallel_lead_checks = ParallelAgent(
 report_compiler = LlmAgent(
     name="report_compiler",
     model=MODEL,
-    # [Step 12] only VALID leads may appear; an empty list is an acceptable answer
+    # only VALID leads may appear; an empty list is an acceptable answer
     instruction="Research request: {intent}\n"
     "Lead validation (VALID or INVALID per lead):\n{lead_validation}\n\n"
     "Lead signal analysis (matched patterns and score):\n{lead_signals}\n\n"
@@ -91,7 +91,7 @@ report_compiler = LlmAgent(
     "the reports; never invent facts or URLs.",
     output_schema=LeadReport,
     output_key="lead_report",
-    # [Step 12] swap Google's temporary redirect links for the real article URLs
+    # swap Google's temporary redirect links for the real article URLs
     after_agent_callback=resolve_source_urls("lead_report", "leads", "source_urls"),
 )
 

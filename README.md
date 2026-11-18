@@ -7,7 +7,7 @@ End-to-end AI agents built with [Google ADK](https://google.github.io/adk-docs/)
 | Agent | Description | Status |
 |---|---|---|
 | [Deep Research Lead Generation](lead_gen_agent/) | Multi-agent web research pipeline that learns pre-investment signals from past investors and finds new companies showing them, with ranked leads and CSV export | ✅ Done |
-| Gemini CLI Tool Agent | ADK agent that delegates tasks to Gemini CLI as a tool | 🚧 Planned |
+| [GitHub Repo Explainer](repo_explainer_agent/) | ADK agent that uses Gemini CLI as a tool to review any public GitHub repo, with cost caps, untrusted-repo lock-down, and a private Cloud Run deployment | ✅ Done |
 | Bug Assistant (MCP) | Bug triage assistant powered by MCP tools (database, GitHub, search) | 🚧 Planned |
 | Code Review Assistant | Production-style code review pipeline with analysis, testing, and feedback | 🚧 Planned |
 | E-Commerce Agent | Shopping assistant with vector search over AlloyDB via MCP Toolbox | 🚧 Planned |
