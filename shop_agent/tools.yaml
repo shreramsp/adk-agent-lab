@@ -1,0 +1,283 @@
+# MCP Toolbox config for the Summit Sports shop (Toolbox v1.x format: one YAML document per item).
+# ${VAR} values come from the environment (run_toolbox.sh loads them from .env).
+
+kind: source
+name: shop-db
+type: postgres           # AlloyDB Omni speaks the Postgres protocol; for AlloyDB in Google Cloud use type alloydb-postgres
+host: ${DB_HOST}
+port: ${DB_PORT}
+database: ${DB_NAME}
+user: ${DB_USER}
+password: ${DB_PASSWORD}
+---
+# Turns a text parameter marked `embeddedBy: gemini-embed` into a vector before the SQL runs.
+# Uses the AI Studio key (GOOGLE_API_KEY), so no Vertex AI is needed. Must match build_db.py:
+# same model and dimension (Toolbox always uses the SEMANTIC_SIMILARITY task type).
+kind: embeddingModel
+name: gemini-embed
+type: gemini
+model: gemini-embedding-001
+dimension: 768
+---
+# Hybrid search: closest MEANING (vector distance) + exact filters (price, size in stock, category)
+# in ONE query. match_score = 1 - cosine distance, so 1.0 = same meaning. Sizes sort numerically.
+kind: tool
+name: search-products
+type: postgres-sql
+source: shop-db
+description: >
+  Find products by what the shopper wants, by meaning (e.g. "shoes for running in the rain").
+  Optional filters: max_price, a size that must be in stock, and a category word.
+  Returns up to 6 products, best match first, with a match_score from 0 to 1 and the sizes in stock.
+parameters:
+  - name: query
+    type: string
+    description: The shopper's need in a few descriptive words (activity, conditions, features). No prices or sizes here.
+    embeddedBy: gemini-embed
+  - name: max_price
+    type: float
+    description: Highest price in USD. Leave at the default when the shopper gave no budget.
+    default: 100000
+  - name: size
+    type: string
+    description: A size that must be in stock, e.g. "10", "9.5", "M", "One Size". Empty for any size.
+    default: ""
+  - name: category
+    type: string
+    description: Optional word to match in the category, e.g. "shoes", "jacket", "helmet". Empty for any.
+    default: ""
+statement: |
+  SELECT p.product_id, p.brand || ' ' || p.name AS product, p.category, p.price,
+         round((1 - (p.embedding <=> $1::vector))::numeric, 3) AS match_score,
+         (SELECT string_agg(i.size, ', ' ORDER BY CASE WHEN i.size ~ '^[0-9.]+$' THEN i.size::numeric END, i.size) FROM inventory i
+           WHERE i.product_id = p.product_id AND i.stock > 0) AS sizes_in_stock
+  FROM products p
+  WHERE p.price <= $2
+    AND ($3 = '' OR EXISTS (SELECT 1 FROM inventory i
+                            WHERE i.product_id = p.product_id AND i.size = $3 AND i.stock > 0))
+    AND ($4 = '' OR p.category ILIKE '%' || $4 || '%')
+  ORDER BY p.embedding <=> $1::vector
+  LIMIT 6;
+---
+kind: tool
+name: product-details
+type: postgres-sql
+source: shop-db
+description: Full details of one product, including its description and stock for every size.
+parameters:
+  - name: product_id
+    type: integer
+    description: The product ID from a search result.
+statement: |
+  SELECT p.product_id, p.brand || ' ' || p.name AS product, p.category, p.sport, p.price, p.description,
+         (SELECT json_object_agg(i.size, i.stock ORDER BY CASE WHEN i.size ~ '^[0-9.]+$' THEN i.size::numeric END, i.size) FROM inventory i
+           WHERE i.product_id = p.product_id) AS stock_by_size
+  FROM products p WHERE p.product_id = $1;
+---
+# "More like this": compares the product's own stored embedding with all others.
+# No embedding API call at all, so it is free and instant.
+kind: tool
+name: similar-products
+type: postgres-sql
+source: shop-db
+description: Products most similar in meaning to a given product ("more like this"), with a similarity score.
+parameters:
+  - name: product_id
+    type: integer
+    description: The product to find alternatives for.
+statement: |
+  SELECT p2.product_id, p2.brand || ' ' || p2.name AS product, p2.category, p2.price,
+         round((1 - (p2.embedding <=> p1.embedding))::numeric, 3) AS similarity
+  FROM products p1
+  JOIN products p2 ON p2.product_id <> p1.product_id
+  WHERE p1.product_id = $1
+  ORDER BY p2.embedding <=> p1.embedding
+  LIMIT 4;
+---
+# Every tool with a user_id parameter gets the value from the agent's code (the ADK session user),
+# which overwrites anything the model puts there. See agent.py: enforce_identity.
+kind: tool
+name: show-shopping-list
+type: postgres-sql
+source: shop-db
+description: The shopper's shopping list with prices, line totals, whether each item is still in stock, and the total.
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+statement: |
+  SELECT sl.product_id, p.brand || ' ' || p.name AS product, sl.size, sl.quantity, p.price,
+         p.price * sl.quantity AS line_total, i.stock >= sl.quantity AS in_stock,
+         sum(p.price * sl.quantity) OVER () AS list_total
+  FROM shopping_list sl
+  JOIN products p ON p.product_id = sl.product_id
+  JOIN inventory i ON i.product_id = sl.product_id AND i.size = sl.size
+  WHERE sl.user_id = $1
+  ORDER BY sl.added_at;
+---
+kind: tool
+name: my-orders
+type: postgres-sql
+source: shop-db
+description: The shopper's orders, newest first, with status, total, and items.
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+statement: |
+  SELECT o.order_id, o.status, o.total, o.created_at::date AS ordered_on,
+         json_agg(json_build_object('product', p.brand || ' ' || p.name, 'size', oi.size,
+                                    'quantity', oi.quantity, 'unit_price', oi.unit_price)) AS items
+  FROM orders o
+  JOIN order_items oi ON oi.order_id = o.order_id
+  JOIN products p ON p.product_id = oi.product_id
+  WHERE o.user_id = $1
+  GROUP BY o.order_id
+  ORDER BY o.created_at DESC
+  LIMIT 10;
+---
+# Upsert: adding the same product and size again raises the quantity (capped at 10) instead of failing.
+# The foreign key rejects a size that doesn't exist for that product.
+kind: tool
+name: add-to-shopping-list
+type: postgres-sql
+source: shop-db
+description: Add a product in a given size to the shopping list (adding it again increases the quantity).
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+  - name: product_id
+    type: integer
+    description: The product ID.
+  - name: size
+    type: string
+    description: The exact size, as listed in sizes_in_stock or stock_by_size.
+  - name: quantity
+    type: integer
+    description: How many, 1 to 5.
+    default: 1
+    minValue: 1
+    maxValue: 5
+statement: |
+  INSERT INTO shopping_list (user_id, product_id, size, quantity)
+  VALUES ($1, $2, $3, $4)
+  ON CONFLICT (user_id, product_id, size)
+  DO UPDATE SET quantity = LEAST(shopping_list.quantity + EXCLUDED.quantity, 10)
+  RETURNING product_id, size, quantity;
+---
+kind: tool
+name: remove-from-shopping-list
+type: postgres-sql
+source: shop-db
+description: Remove one product and size from the shopping list.
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+  - name: product_id
+    type: integer
+    description: The product ID.
+  - name: size
+    type: string
+    description: The size to remove.
+statement: |
+  DELETE FROM shopping_list WHERE user_id = $1 AND product_id = $2 AND size = $3
+  RETURNING product_id, size;
+---
+# One statement = one transaction: all of it happens or none of it does.
+#  1. items:   the list joined with stock, rows LOCKED (FOR UPDATE) so two orders can't sell the same pair
+#  2. ok:      true only if the list isn't empty and every line has enough stock
+#  3. the INSERT/UPDATE/DELETE steps run only when ok: create the order, copy the lines at today's
+#     price, lower the stock, empty the list
+#  4. the final SELECT says what happened (and why not, if it didn't)
+# CHECK (stock >= 0) on inventory is a second safety net: overselling would abort the whole statement.
+kind: tool
+name: place-order
+type: postgres-sql
+source: shop-db
+description: >
+  Order everything on the shopping list. All-or-nothing: if any item is out of stock, nothing is ordered
+  and the result says which items. On success the list is emptied and stock is reduced.
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+statement: |
+  WITH items AS (
+    SELECT sl.product_id, sl.size, sl.quantity, p.price, i.stock, p.brand || ' ' || p.name AS product
+    FROM shopping_list sl
+    JOIN products p ON p.product_id = sl.product_id
+    JOIN inventory i ON i.product_id = sl.product_id AND i.size = sl.size
+    WHERE sl.user_id = $1
+    FOR UPDATE OF i
+  ),
+  ok AS (
+    SELECT count(*) > 0 AND bool_and(stock >= quantity) AS ok FROM items
+  ),
+  new_order AS (
+    INSERT INTO orders (user_id, total)
+    SELECT $1, (SELECT sum(price * quantity) FROM items) FROM ok WHERE ok.ok
+    RETURNING order_id, total
+  ),
+  lines AS (
+    INSERT INTO order_items (order_id, product_id, size, quantity, unit_price)
+    SELECT o.order_id, it.product_id, it.size, it.quantity, it.price FROM new_order o CROSS JOIN items it
+    RETURNING 1
+  ),
+  stock AS (
+    UPDATE inventory i SET stock = i.stock - it.quantity
+    FROM items it
+    WHERE i.product_id = it.product_id AND i.size = it.size AND EXISTS (SELECT 1 FROM new_order)
+    RETURNING 1
+  ),
+  cleared AS (
+    DELETE FROM shopping_list WHERE user_id = $1 AND EXISTS (SELECT 1 FROM new_order)
+    RETURNING 1
+  )
+  SELECT CASE
+           WHEN EXISTS (SELECT 1 FROM new_order) THEN 'placed'
+           WHEN NOT EXISTS (SELECT 1 FROM items) THEN 'not placed: the shopping list is empty'
+           ELSE 'not placed: not enough stock for ' ||
+                (SELECT string_agg(product || ' size ' || size || ' (wanted ' || quantity || ', in stock ' || stock || ')', '; ')
+                 FROM items WHERE stock < quantity)
+         END AS result,
+         (SELECT order_id FROM new_order) AS order_id,
+         (SELECT total FROM new_order) AS total,
+         (SELECT count(*) FROM lines) AS items_ordered;
+---
+# Only a 'Placed' order that belongs to this user can be cancelled; its stock goes back, in one statement.
+kind: tool
+name: cancel-order
+type: postgres-sql
+source: shop-db
+description: Cancel one of the shopper's orders. Only orders with status Placed can be cancelled; the stock is returned.
+parameters:
+  - name: user_id
+    type: string
+    description: Filled in automatically by the app. Pass "me".
+  - name: order_id
+    type: integer
+    description: The order to cancel.
+statement: |
+  WITH cancelled AS (
+    UPDATE orders SET status = 'Cancelled'
+    WHERE order_id = $2 AND user_id = $1 AND status = 'Placed'
+    RETURNING order_id
+  ),
+  restocked AS (
+    UPDATE inventory i SET stock = i.stock + oi.quantity
+    FROM order_items oi
+    JOIN cancelled c ON c.order_id = oi.order_id
+    WHERE i.product_id = oi.product_id AND i.size = oi.size
+    RETURNING 1
+  )
+  SELECT CASE WHEN EXISTS (SELECT 1 FROM cancelled) THEN 'cancelled'
+              ELSE 'not cancelled: you have no order with that ID that is still Placed' END AS result,
+         $2 AS order_id,
+         (SELECT count(*) FROM restocked) AS stock_lines_returned;
+---
+kind: toolset
+name: shop-tools
+tools: [search-products, product-details, similar-products, show-shopping-list, my-orders,
+        add-to-shopping-list, remove-from-shopping-list, place-order, cancel-order]

@@ -20,3 +20,6 @@ service-account*.json
 
 # MCP Toolbox binary (downloaded per machine, ~100 MB)
 bug_assistant_agent/toolbox
+
+# MCP Toolbox binary for the shop agent (if downloaded here)
+shop_agent/toolbox

@@ -1,0 +1,27 @@
+# AlloyDB Omni: the AlloyDB engine (vector search with ScaNN, AlloyDB AI extensions) as a free local
+# container for development. Same SQL as AlloyDB in Google Cloud, so the agent works with either.
+# Start: docker compose -f shop_agent/docker-compose.yml up -d --wait
+# Stop:  docker compose -f shop_agent/docker-compose.yml down     (add -v to wipe the data)
+services:
+  shop-db:
+    image: google/alloydbomni:17.10.0
+    container_name: shop-db
+    environment:  # local-only dev credentials (same values as .env.example)
+      POSTGRES_USER: shopadmin
+      POSTGRES_PASSWORD: shoppass
+      POSTGRES_DB: shop
+    ports:
+      - "5434:5432"  # 5432 = a local Postgres, 5433 = the bug assistant's database
+    volumes:
+      # every .sql file here runs once, in name order, on the first start: schema, catalog, embeddings
+      - ./db:/docker-entrypoint-initdb.d:ro
+      - shop-db-data:/var/lib/postgresql/data
+    healthcheck:
+      # -h 127.0.0.1: during first-start setup Postgres runs a temporary socket-only server; checking over
+      # TCP waits for the real one, so "healthy" really means ready
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U shopadmin -d shop"]
+      interval: 2s
+      retries: 60
+
+volumes:
+  shop-db-data:
