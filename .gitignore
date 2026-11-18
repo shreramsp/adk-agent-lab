@@ -17,3 +17,6 @@ service-account*.json
 
 # ADK local sessions
 .adk/
+
+# MCP Toolbox binary (downloaded per machine, ~100 MB)
+bug_assistant_agent/toolbox

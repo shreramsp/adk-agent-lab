@@ -1,0 +1,201 @@
+# MCP Toolbox config. Toolbox reads this file and serves every tool below over MCP,
+# so the agent gets database tools without any Python database code.
+# Format (Toolbox v1.x): one YAML document per item, separated by "---".
+# ${VAR} values come from the environment (run_toolbox.sh loads them from .env).
+
+kind: source
+name: bug-db
+type: postgres
+host: ${DB_HOST}
+port: ${DB_PORT}
+database: ${DB_NAME}
+user: ${DB_USER}
+password: ${DB_PASSWORD}
+---
+# Fuzzy search: pg_trgm similarity finds "Safari login blank" even if the words differ a bit.
+# ILIKE catches exact words; the score sorts the best matches first.
+kind: tool
+name: search-tickets
+type: postgres-sql
+source: bug-db
+description: >
+  Search bug tickets by keywords (fuzzy match on title and description).
+  Use this before creating a ticket, to find existing or duplicate tickets.
+  Returns up to 10 tickets, best match first, with a match score from 0 to 1.
+parameters:
+  - name: query
+    type: string
+    description: Short keywords describing the bug, e.g. "safari login blank page".
+statement: |
+  SELECT ticket_id, title, description, assignee, priority, status, created_at,
+         round(greatest(similarity(title, $1), word_similarity($1, title || ' ' || description))::numeric, 2) AS score
+  FROM tickets
+  WHERE title ILIKE '%' || $1 || '%'
+     OR description ILIKE '%' || $1 || '%'
+     OR greatest(similarity(title, $1), word_similarity($1, title || ' ' || description)) > 0.25
+  ORDER BY score DESC
+  LIMIT 10;
+---
+kind: tool
+name: get-ticket
+type: postgres-sql
+source: bug-db
+description: Get one bug ticket by its numeric ID.
+parameters:
+  - name: ticket_id
+    type: integer
+    description: The ticket ID, e.g. 3.
+statement: SELECT * FROM tickets WHERE ticket_id = $1;
+---
+# No inputs: the agent's "what's open?" tool. Sorted so P0 comes first, oldest first.
+kind: tool
+name: list-open-tickets
+type: postgres-sql
+source: bug-db
+description: List all tickets that are not Closed, highest priority (P0) first, then oldest first.
+statement: |
+  SELECT ticket_id, title, assignee, priority, status, created_at
+  FROM tickets
+  WHERE status <> 'Closed'
+  ORDER BY priority, created_at;
+---
+# RETURNING * sends the new row back, so the agent can tell the user the new ticket ID.
+# New tickets start Open and unassigned; use assign-ticket afterwards.
+kind: tool
+name: create-ticket
+type: postgres-sql
+source: bug-db
+description: Create a new bug ticket. It starts as Open and unassigned. Returns the new ticket.
+parameters:
+  - name: title
+    type: string
+    description: Short summary of the bug, under 80 characters.
+  # a fixed layout so every ticket has what a developer needs to reproduce the bug
+  - name: description
+    type: string
+    description: >
+      Use this layout, one line each: "Steps to reproduce: ...", "Expected: ...", "Actual: ...",
+      "Environment: ..." (browser, OS, app version), and "Error: ..." if there is one.
+      Write "unknown" for anything the user could not provide.
+  - name: priority
+    type: string
+    description: "One of: P0 (outage), P1 (major feature broken), P2 (normal bug), P3 (minor or cosmetic)."
+statement: |
+  INSERT INTO tickets (title, description, priority)
+  VALUES ($1, $2, $3)
+  RETURNING *;
+---
+# Small, single-purpose update tools are safer than one "update anything" tool:
+# the agent can't change fields it wasn't asked to, and the DB CHECK rejects bad values.
+kind: tool
+name: update-ticket-status
+type: postgres-sql
+source: bug-db
+description: Change a ticket's status. Returns the updated ticket.
+parameters:
+  - name: ticket_id
+    type: integer
+    description: The ticket ID.
+  - name: status
+    type: string
+    description: "One of: Open, In Progress, Closed."
+statement: |
+  UPDATE tickets SET status = $2, updated_at = now()
+  WHERE ticket_id = $1
+  RETURNING *;
+---
+kind: tool
+name: assign-ticket
+type: postgres-sql
+source: bug-db
+description: Assign a ticket to a person (their username, e.g. maria.lopez). Returns the updated ticket.
+parameters:
+  - name: ticket_id
+    type: integer
+    description: The ticket ID.
+  - name: assignee
+    type: string
+    description: Username of the person to assign.
+statement: |
+  UPDATE tickets SET assignee = $2, updated_at = now()
+  WHERE ticket_id = $1
+  RETURNING *;
+---
+# Backlog-wide duplicate scan: compares every pair of open tickets once (a.id < b.id).
+# Score = the higher of title-vs-title and full-text-vs-full-text similarity. On our data, real duplicates
+# score 0.28-0.32 and unrelated pairs at most 0.19, so 0.25 is the cutoff.
+kind: tool
+name: find-duplicate-tickets
+type: postgres-sql
+source: bug-db
+description: >
+  Scan all open tickets for likely duplicates (pairs that describe the same bug).
+  Returns pairs with a similarity score from 0 to 1, most similar first. Use it for a backlog cleanup.
+statement: |
+  SELECT a.ticket_id AS ticket_a, a.title AS title_a, a.created_at AS created_a,
+         b.ticket_id AS ticket_b, b.title AS title_b, b.created_at AS created_b,
+         round(greatest(similarity(a.title, b.title),
+                        similarity(a.title || ' ' || a.description, b.title || ' ' || b.description))::numeric, 2) AS score
+  FROM tickets a
+  JOIN tickets b ON a.ticket_id < b.ticket_id
+  WHERE a.status <> 'Closed' AND b.status <> 'Closed'
+    AND greatest(similarity(a.title, b.title),
+                 similarity(a.title || ' ' || a.description, b.title || ' ' || b.description)) >= 0.25
+  ORDER BY score DESC
+  LIMIT 10;
+---
+# Closes the copy and links it to the original, so nothing is lost: the original keeps the
+# history and anyone opening the duplicate sees where to go. The DB rejects a self-link or a missing ID.
+kind: tool
+name: mark-duplicate
+type: postgres-sql
+source: bug-db
+description: >
+  Close a ticket as a duplicate of another (original) ticket. Usually keep the OLDER ticket as the
+  original. Returns the closed ticket.
+parameters:
+  - name: ticket_id
+    type: integer
+    description: The duplicate ticket to close.
+  - name: original_id
+    type: integer
+    description: The original ticket that stays open.
+statement: |
+  UPDATE tickets SET status = 'Closed', duplicate_of = $2, updated_at = now()
+  WHERE ticket_id = $1
+  RETURNING *;
+---
+# One-query backlog overview. Each column is a small JSON object/list, so the agent gets
+# counts, urgent unassigned work, and the oldest open tickets in a single tool call.
+kind: tool
+name: triage-summary
+type: postgres-sql
+source: bug-db
+description: >
+  Overview of the backlog: open tickets per priority, all tickets per status, open P0/P1 tickets with
+  no assignee, and the 3 oldest open tickets with their age in days.
+statement: |
+  SELECT
+    (SELECT json_object_agg(priority, n ORDER BY priority)
+       FROM (SELECT priority, count(*) AS n FROM tickets WHERE status <> 'Closed' GROUP BY priority) p) AS open_by_priority,
+    (SELECT json_object_agg(status, n)
+       FROM (SELECT status, count(*) AS n FROM tickets GROUP BY status) s) AS all_by_status,
+    (SELECT json_agg(json_build_object('ticket_id', ticket_id, 'title', title, 'priority', priority) ORDER BY priority, ticket_id)
+       FROM tickets WHERE status <> 'Closed' AND assignee IS NULL AND priority IN ('P0', 'P1')) AS unassigned_urgent,
+    (SELECT json_agg(o)
+       FROM (SELECT ticket_id, title, priority, current_date - created_at::date AS age_days
+             FROM tickets WHERE status <> 'Closed' ORDER BY created_at LIMIT 3) o) AS oldest_open;
+---
+# A toolset groups tools. Toolbox serves it at /mcp/bug-tools (all tools are also at /mcp).
+kind: toolset
+name: bug-tools
+tools:
+  - search-tickets
+  - get-ticket
+  - list-open-tickets
+  - create-ticket
+  - update-ticket-status
+  - assign-ticket
+  - find-duplicate-tickets   # 
+  - mark-duplicate           # 
+  - triage-summary           # 

@@ -1,0 +1,24 @@
+# Local Postgres for the bug assistant. Free, runs only on this Mac.
+# Start: docker compose -f bug_assistant_agent/docker-compose.yml up -d
+# Stop:  docker compose -f bug_assistant_agent/docker-compose.yml down     (add -v to wipe the data)
+services:
+  bug-db:
+    image: postgres:17-alpine      # small official image, pinned to a major version
+    container_name: bug-db
+    environment:                   # local-only dev credentials (same values as .env.example)
+      POSTGRES_USER: bugadmin
+      POSTGRES_PASSWORD: bugpass
+      POSTGRES_DB: bugs
+    ports:
+      - "5433:5432"                # 5433 on the Mac -> 5432 in the container (5432 is taken by a local Postgres)
+    volumes:
+      # Postgres runs every .sql file in this folder once, on the first start (empty data volume)
+      - ./db:/docker-entrypoint-initdb.d:ro
+      - bug-db-data:/var/lib/postgresql/data   # keeps tickets across restarts
+    healthcheck:                   # lets us wait until the DB is ready to accept connections
+      test: ["CMD-SHELL", "pg_isready -U bugadmin -d bugs"]
+      interval: 2s
+      retries: 15
+
+volumes:
+  bug-db-data:

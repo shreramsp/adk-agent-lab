@@ -1,2 +1,2 @@
-google-adk==2.14.1
+google-adk[mcp]==2.14.1  # [mcp] adds the MCP client library for McpToolset
 httpx==0.28.1
