@@ -1,0 +1,183 @@
+{
+  "eval_set_id": "code_review_routing",
+  "name": "Code review assistant: routing and end-to-end",
+  "description": "Does the root agent hand each request to the right pipeline, and do both pipelines finish?",
+  "eval_cases": [
+    {
+      "eval_id": "capabilities",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "What can you do?"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "I review Python code: I check structure and complexity, PEP 8 style, and security risks with exact tools, write unit tests and run them in an isolated Docker sandbox, remember past reviews to show your progress, and can fix the code, re-testing until nothing is worse. Paste some Python code to start."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "code_review_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "review_without_code",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Can you review my code?"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Sure, please paste the Python code you want me to review."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "code_review_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "review_routes_to_pipeline",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Please review this:\n```python\ndef Average(nums):\n    total=0\n    for n in nums: total+=n\n    return total/len(nums)\n```"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Request changes: Style 71/100 · Security 0 · Tests 7/7 · Max complexity 2\n\n🟡 Should fix:\n- Add a docstring to function `Average` on line 1.\n\n🔵 Style:\n- Naming convention: function name `Average` should use snake_case on line 1.\n- Whitespace: missing whitespace around operators (`=`, `+=`) on lines 2 and 3.\n- Statements: multiple statements on one line after a colon on line 3.\n\nWant me to fix these? I'll fix the code, re-run the tests, and only accept a version that doesn't make anything worse."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "transfer_to_agent",
+                "args": {
+                  "agent_name": "review_pipeline"
+                }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "code_review_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    },
+    {
+      "eval_id": "review_then_fix",
+      "conversation": [
+        {
+          "invocation_id": "inv-1",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "Please review this:\n```python\ndef Average(nums):\n    total=0\n    for n in nums: total+=n\n    return total/len(nums)\n```"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Request changes: Style 71/100 · Security 0 · Tests 7/7 · Max complexity 2\n\n🟡 Should fix:\n- Add a docstring to function `Average` on line 1.\n\n🔵 Style:\n- Naming convention: function name `Average` should use snake_case on line 1.\n- Whitespace: missing whitespace around operators (`=`, `+=`) on lines 2 and 3.\n- Statements: multiple statements on one line after a colon on line 3.\n\nWant me to fix these? I'll fix the code, re-run the tests, and only accept a version that doesn't make anything worse."
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "transfer_to_agent",
+                "args": {
+                  "agent_name": "review_pipeline"
+                }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        },
+        {
+          "invocation_id": "inv-2",
+          "user_content": {
+            "role": "user",
+            "parts": [
+              {
+                "text": "yes, fix it"
+              }
+            ]
+          },
+          "final_response": {
+            "role": "model",
+            "parts": [
+              {
+                "text": "Result: ACCEPTED after 1 attempt(s).\n\n| Metric | Before | After |\n|---|---|---|\n| Style | 71/100 | 93/100 |\n| Security findings | 0 | 0 |\n| Tests | 7/7 | 7/7 |\n\nWhat changed\n- Added a docstring to `Average`.\n- Uses `sum()` instead of a manual loop.\n- Added spaces around operators and split the one-line loop.\n\n```python\ndef Average(nums):\n    \"\"\"Return the mean of nums. Raises ZeroDivisionError for an empty list.\"\"\"\n    return sum(nums) / len(nums)\n```"
+              }
+            ]
+          },
+          "intermediate_data": {
+            "tool_uses": [
+              {
+                "name": "transfer_to_agent",
+                "args": {
+                  "agent_name": "fix_pipeline"
+                }
+              }
+            ],
+            "intermediate_responses": []
+          }
+        }
+      ],
+      "session_input": {
+        "app_name": "code_review_agent",
+        "user_id": "eval_user",
+        "state": {}
+      }
+    }
+  ]
+}

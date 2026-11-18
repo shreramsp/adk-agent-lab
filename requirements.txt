@@ -1,2 +1,3 @@
-google-adk[mcp]==2.14.1  # [mcp] adds the MCP client library for McpToolset
+google-adk[mcp,eval]==2.14.1  # [mcp]: MCP client for McpToolset, [eval]: `adk eval`
 httpx==0.28.1
+pycodestyle==2.14.0  # PEP 8 checker used by code_review_agent
