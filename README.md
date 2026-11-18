@@ -27,4 +27,4 @@ pip install -r requirements.txt
 adk web          # run from the repo root, then pick an agent in the browser
 ```
 
-Each agent folder has its own `README.md` and `.env.example`. `hello_agent/` is a minimal single-tool agent for checking your setup.
+Each agent folder has its own `README.md` and `.env.example`.
