@@ -15,7 +15,7 @@ def get_current_time(timezone: str) -> dict:
 
 root_agent = Agent(
     name="hello_agent",
-    model="gemini-2.5-flash",
+    model="gemini-3.5-flash-lite",
     description="A friendly assistant that can tell the current time anywhere.",
     instruction="You are a friendly assistant. When the user asks about the time "
     "in a place, call get_current_time with the correct IANA timezone.",
