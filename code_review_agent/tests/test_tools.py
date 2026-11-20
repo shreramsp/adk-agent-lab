@@ -70,6 +70,17 @@ class SecurityTest(unittest.TestCase):
     def test_safe_code_has_no_findings(self):
         self.assertEqual(analysis.analyze(CLEAN)["security"], [])
 
+    def test_secret_hidden_in_env_fallback(self):
+        for code in ('import os\nAPI_KEY = os.environ.get("API_KEY", "sk-live-1234567890")\n',
+                     'import os\nTOKEN = os.getenv("TOKEN", default="abcd1234")\n',
+                     'import os\npassword = os.getenv("PW") or "hunter22"\n'):
+            rules = [f["rule"] for f in analysis.analyze(code)["security"]]
+            self.assertEqual(rules, ["hardcoded-secret"], code)
+
+    def test_env_without_default_is_fine(self):
+        code = 'import os\nAPI_KEY = os.environ["API_KEY"]\nTOKEN = os.getenv("TOKEN", "")\n'
+        self.assertEqual(analysis.analyze(code)["security"], [])
+
     def test_safe_yaml_loader_is_fine(self):
         code = "import yaml\ndata = yaml.load(open('f'), Loader=yaml.SafeLoader)\n"
         self.assertEqual(analysis.analyze(code)["security"], [])

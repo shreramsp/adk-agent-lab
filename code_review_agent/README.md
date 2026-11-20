@@ -45,7 +45,7 @@ Steps marked *code* are **custom agents**: `BaseAgent` subclasses with a `_run_a
 | [analysis.py](analysis.py) | AST structure, cyclomatic complexity, security rules, PEP 8 style score |
 | [sandbox.py](sandbox.py) | Runs generated tests in a locked-down, throw-away Docker container |
 | [config.py](config.py) | Model, limits, sandbox settings |
-| [tests/](tests/) | 19 unit tests for the non-AI parts (free) |
+| [tests/](tests/) | 21 unit tests for the non-AI parts (free) |
 | [evals/](evals/) | `adk eval` test set: routing and full review → fix conversations |
 
 ## Key ideas
@@ -59,7 +59,7 @@ Steps marked *code* are **custom agents**: `BaseAgent` subclasses with a `_run_a
 
 The starting point was Google's code-review-assistant codelab ([ayoisio/adk-code-review-assistant](https://github.com/ayoisio/adk-code-review-assistant)). This version adds:
 
-1. **Security scan (AST rules):** `eval`/`exec`, `os.system`, `subprocess(..., shell=True)`, `pickle`/`marshal` loads, `yaml.load` without `SafeLoader`, `verify=False`, `md5`/`sha1`, `tempfile.mktemp`, hard-coded secrets (assignments and keyword args), and bare `except:`. Findings are sorted high → low.
+1. **Security scan (AST rules):** `eval`/`exec`, `os.system`, `subprocess(..., shell=True)`, `pickle`/`marshal` loads, `yaml.load` without `SafeLoader`, `verify=False`, `md5`/`sha1`, `tempfile.mktemp`, hard-coded secrets (assignments, keyword args, and hard-coded fallbacks like `os.getenv("KEY", "secret")`), and bare `except:`. Findings are sorted high → low.
 2. **Complexity per function:** cyclomatic complexity from the AST (branches, loops, `and`/`or`, comprehensions, `except`, `case`). Above 10 is flagged as too complex to test well.
 3. **A stricter, code-enforced "done" rule** for the fix loop (above). In the original, a model decides whether the fix worked. Here, plain Python decides from real numbers.
 4. **Review memory** in `user:` state, with progress and repeated-mistake notes.
@@ -81,6 +81,7 @@ Inside, a small runner prints the result as one JSON line that starts with a ran
 
 - **`ctx.end_invocation = True` in a custom agent did not stop the rest of a `SequentialAgent`.** In a free test run with canned model outputs, the "no code found" path kept going and crashed in the next step. In ADK 2.14 every agent runs on its own copy of the invocation context, so the flag set by one step never reaches its parent. The fix is a 10-line `Pipeline` agent that runs its steps in order and stops when a step writes `halt=True` to **state**, which all steps share.
 - **The style score was useless for short snippets.** The first `adk eval` run scored a 4-line function with 5 small PEP 8 issues **0/100**, because the score was "issues per line". It is now `100 − 100 × issues / (lines + 10)`, so the same function scores 71 and a long file is barely affected. The missing final newline that pasted code always has (W292) is also no longer counted.
+- **The fixer gamed the security rule.** In a recorded demo, the fix turned `API_KEY = "sk-live-..."` into `API_KEY = os.environ.get("API_KEY", "sk-live-...")`, which still contains the secret, now as a fallback. The rule only matched a string assigned directly, so the checker accepted it. Now a secret-named variable that falls back to a literal (`os.environ.get(..., "...")`, `os.getenv(..., default=...)`, `os.getenv(...) or "..."`) is a high finding too, the fixer is told "no hard-coded default", and 3 unit tests cover it. Lesson: when an AI is optimised against a checker, it finds the checker's gaps, so test the checker with the AI's real outputs.
 - **The generated tests decide what "correct" means for edge cases.** For `Average([])`, the test writer chose "raises ZeroDivisionError" as the expected behaviour, so the original code passed 7/7. The review then correctly reported no failing tests instead of inventing one: the feedback writer only uses the tool results it is given.
 
 ## Run locally

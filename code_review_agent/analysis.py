@@ -130,6 +130,21 @@ def _is_secret_literal(node: ast.AST | None) -> bool:
     return isinstance(node, ast.Constant) and isinstance(node.value, str) and len(node.value) >= 4
 
 
+_ENV_READERS = ("os.environ.get", "environ.get", "os.getenv", "getenv")
+
+
+def _has_secret_fallback(value: ast.AST | None) -> bool:
+    """True for `os.environ.get("KEY", "sk-...")`, `os.getenv("KEY", default="sk-...")`, or
+    `os.getenv("KEY") or "sk-..."`: the secret is still in the code, only moved into a default.
+    (Seen in a real fix attempt: the fixer did exactly this, and the first version of this rule missed it.)"""
+    if isinstance(value, ast.Call) and _dotted(value.func) in _ENV_READERS:
+        default = value.args[1] if len(value.args) > 1 else _kw(value, "default")
+        return _is_secret_literal(default)
+    if isinstance(value, ast.BoolOp) and isinstance(value.op, ast.Or):
+        return any(_is_secret_literal(v) for v in value.values)
+    return False
+
+
 def _security(tree: ast.Module) -> list[dict[str, Any]]:
     found: list[dict[str, Any]] = []
 
@@ -166,8 +181,13 @@ def _security(tree: ast.Module) -> list[dict[str, Any]]:
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
             for t in targets:
                 tname = _dotted(t)
-                if tname and _SECRET_NAME.search(tname.rsplit(".", 1)[-1]) and _is_secret_literal(node.value):
+                if not (tname and _SECRET_NAME.search(tname.rsplit(".", 1)[-1])):
+                    continue
+                if _is_secret_literal(node.value):
                     add("hardcoded-secret", "high", node, f"'{tname}' is hard-coded; load it from an environment variable.")
+                elif _has_secret_fallback(node.value):
+                    add("hardcoded-secret", "high", node,
+                        f"'{tname}' falls back to a hard-coded secret; read it from the environment with no default.")
         elif isinstance(node, ast.ExceptHandler) and node.type is None:
             add("bare-except", "low", node, "bare `except:` also catches KeyboardInterrupt/SystemExit and hides bugs; catch specific errors.")
     return sorted(found, key=lambda f: ({"high": 0, "medium": 1, "low": 2}[f["severity"]], f["line"]))

@@ -109,7 +109,7 @@ code_fixer = LlmAgent(
         "FEEDBACK ON YOUR PREVIOUS ATTEMPT:\n{fix_feedback}\n\n"
         "Rules:\n"
         "- Keep every public function and class name and its parameters, because the tests import them.\n"
-        "- Fix every security finding: read secrets with os.environ, pass subprocess a list of "
+        "- Fix every security finding: read secrets with os.environ[...] and NO hard-coded default value, pass subprocess a list of "
         "arguments (shlex.split for a command string) without shell=True, catch specific exceptions.\n"
         "- Fix real bugs so the tests pass. Never add special cases for specific test inputs.\n"
         "- Split any function above the complexity limit into smaller helpers.\n"
