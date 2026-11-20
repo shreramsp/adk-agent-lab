@@ -231,17 +231,17 @@ def _build_prompt(repo_map: dict, focus: str) -> str:
 
 def _analyze(repo_url: str, focus: str) -> dict:
     try:
-        owner, repo = validate_github_url(repo_url)  # 
-        github_info = check_repo_size(owner, repo)  # 
+        owner, repo = validate_github_url(repo_url)  # only https://github.com/<owner>/<repo>
+        github_info = check_repo_size(owner, repo)  # free API call: refuse big repos before downloading
     except ValueError as e:
         return {"status": "error", "message": str(e)}
 
     root = None
     try:
-        root = clone_repo(owner, repo)  # 
-        removed = lock_down_clone(root)  # 
-        repo_map = build_repo_map(root)  # 
-        result = run_gemini_cli(_build_prompt(repo_map, focus), root)  # 
+        root = clone_repo(owner, repo)  # shallow clone into a temp folder
+        removed = lock_down_clone(root)  # delete files that could change Gemini CLI's behaviour
+        repo_map = build_repo_map(root)  # free summary in plain Python
+        result = run_gemini_cli(_build_prompt(repo_map, focus), root)  # the only step that costs money
     except ValueError as e:
         return {"status": "error", "message": str(e)}
     finally:

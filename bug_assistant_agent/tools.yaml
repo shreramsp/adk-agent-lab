@@ -196,6 +196,6 @@ tools:
   - create-ticket
   - update-ticket-status
   - assign-ticket
-  - find-duplicate-tickets   # 
-  - mark-duplicate           # 
-  - triage-summary           # 
+  - find-duplicate-tickets
+  - mark-duplicate
+  - triage-summary
