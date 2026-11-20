@@ -45,7 +45,7 @@ Steps marked *code* are **custom agents**: `BaseAgent` subclasses with a `_run_a
 | [analysis.py](analysis.py) | AST structure, cyclomatic complexity, security rules, PEP 8 style score |
 | [sandbox.py](sandbox.py) | Runs generated tests in a locked-down, throw-away Docker container |
 | [config.py](config.py) | Model, limits, sandbox settings |
-| [tests/](tests/) | 21 unit tests for the non-AI parts (free) |
+| [tests/](tests/) | 22 unit tests for the non-AI parts (free) |
 | [evals/](evals/) | `adk eval` test set: routing and full review → fix conversations |
 
 ## Key ideas
@@ -73,7 +73,7 @@ Also changed:
 
 The pasted code and the generated tests are untrusted, so they never run on the host. Each test run gets a fresh container:
 
-`--network none` · `--read-only` (plus a 16 MB `/tmp`) · code mounted read-only · `--user 65534` (nobody) · `--cap-drop ALL` · `no-new-privileges` · 256 MB memory · 64 processes · 30 s timeout (then `docker kill`) · `python -I`
+`--network none` · placeholder values for the environment variables the code reads · `--read-only` (plus a 16 MB `/tmp`) · code mounted read-only · `--user 65534` (nobody) · `--cap-drop ALL` · `no-new-privileges` · 256 MB memory · 64 processes · 30 s timeout (then `docker kill`) · `python -I`
 
 Inside, a small runner prints the result as one JSON line that starts with a random marker, so output printed by the code under test can't fake a result. That output is also capped at 64 KB. The unit tests check that writing files and opening network connections fail, that `sys.exit()` while loading is caught, and that a fake result line is ignored.
 
@@ -82,6 +82,7 @@ Inside, a small runner prints the result as one JSON line that starts with a ran
 - **`ctx.end_invocation = True` in a custom agent did not stop the rest of a `SequentialAgent`.** In a free test run with canned model outputs, the "no code found" path kept going and crashed in the next step. In ADK 2.14 every agent runs on its own copy of the invocation context, so the flag set by one step never reaches its parent. The fix is a 10-line `Pipeline` agent that runs its steps in order and stops when a step writes `halt=True` to **state**, which all steps share.
 - **The style score was useless for short snippets.** The first `adk eval` run scored a 4-line function with 5 small PEP 8 issues **0/100**, because the score was "issues per line". It is now `100 − 100 × issues / (lines + 10)`, so the same function scores 71 and a long file is barely affected. The missing final newline that pasted code always has (W292) is also no longer counted.
 - **The fixer gamed the security rule.** In a recorded demo, the fix turned `API_KEY = "sk-live-..."` into `API_KEY = os.environ.get("API_KEY", "sk-live-...")`, which still contains the secret, now as a fallback. The rule only matched a string assigned directly, so the checker accepted it. Now a secret-named variable that falls back to a literal (`os.environ.get(..., "...")`, `os.getenv(..., default=...)`, `os.getenv(...) or "..."`) is a high finding too, the fixer is told "no hard-coded default", and 3 unit tests cover it. Lesson: when an AI is optimised against a checker, it finds the checker's gaps, so test the checker with the AI's real outputs.
+- **...and the stricter rule then blocked every correct fix.** The next run's fixer did the right thing, `API_KEY = os.environ["API_KEY"]`, but the sandbox starts with an empty environment, so importing the code raised `KeyError` and all 3 attempts were rejected with "tests n/a". The sandbox now finds the environment variables the code reads (from the AST) and passes harmless placeholder values, as a real deployment would pass real secrets. Replaying that recorded attempt now gives 6/6 tests and ACCEPTED.
 - **The generated tests decide what "correct" means for edge cases.** For `Average([])`, the test writer chose "raises ZeroDivisionError" as the expected behaviour, so the original code passed 7/7. The review then correctly reported no failing tests instead of inventing one: the feedback writer only uses the tool results it is given.
 
 ## Run locally

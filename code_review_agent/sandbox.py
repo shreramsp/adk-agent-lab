@@ -8,8 +8,10 @@ CPU, processes, and time. The container is deleted afterwards.
 
 from __future__ import annotations
 
+import ast
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -64,6 +66,39 @@ def strip_fences(text: str) -> str:
     return t.strip("\n") + "\n"
 
 
+_ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,63}$")
+
+
+def env_vars_read(source: str) -> list[str]:
+    """Names of environment variables the code reads: os.environ["X"], os.environ.get("X"), os.getenv("X")."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return []
+    names = set()
+    for node in ast.walk(tree):
+        arg = None
+        if isinstance(node, ast.Subscript) and ast.unparse(node.value) in ("os.environ", "environ"):
+            arg = node.slice
+        elif isinstance(node, ast.Call) and ast.unparse(node.func) in (
+                "os.environ.get", "environ.get", "os.getenv", "getenv") and node.args:
+            arg = node.args[0]
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str) and _ENV_NAME.match(arg.value):
+            names.add(arg.value)
+    return sorted(names)[:20]
+
+
+def _placeholder_env(code: str, tests: str) -> list[str]:
+    """`-e NAME=placeholder` for every env var the code or tests read. A correct fix reads secrets with
+    os.environ["API_KEY"] and no default; with an empty environment that raises KeyError on import and no
+    test could run (seen in a recorded run: all 3 fix attempts were rejected for it). Real deployments
+    provide secrets through the environment, so the sandbox does too, with harmless fake values."""
+    flags: list[str] = []
+    for name in sorted(set(env_vars_read(code)) | set(env_vars_read(tests))):
+        flags += ["-e", f"{name}=sandbox-placeholder"]
+    return flags
+
+
 def sandbox_problem() -> str | None:
     """None if Docker and the sandbox image are ready, otherwise a short explanation."""
     if not shutil.which("docker"):
@@ -109,6 +144,7 @@ def run_tests(code: str, tests: str) -> dict[str, Any]:
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--user", "65534:65534",                  # "nobody", not root
             "-v", f"{work}:/work:ro", "-w", "/tmp",   # the code itself is mounted read-only
+            *_placeholder_env(code, tests),           # dummy values for env vars the code reads
             config.SANDBOX_IMAGE,
             "python", "-I", "-B", "/work/_runner.py", marker,  # -I: ignore env vars and user site-packages
         ]

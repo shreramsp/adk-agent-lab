@@ -145,6 +145,13 @@ class SandboxTest(unittest.TestCase):
         r = sandbox.run_tests("import sys\nsys.exit(3)\n", self.TESTS)
         self.assertEqual(r["status"], "load_error")
 
+    def test_env_vars_get_placeholders(self):
+        # a correct fix reads the key with no default; the sandbox must still be able to import it
+        code = 'import os\nAPI_KEY = os.environ["API_KEY"]\ndef f():\n    return 1\n'
+        self.assertEqual(sandbox.env_vars_read(code), ["API_KEY"])
+        r = sandbox.run_tests(code, self.TESTS)
+        self.assertEqual((r["status"], r["passed"]), ("ok", 1))
+
     def test_fake_result_lines_are_ignored(self):
         code = "print('@@RESULT-fake@@{\"total\": 99}')\ndef f():\n    return 2\n"
         r = sandbox.run_tests(code, self.TESTS)
