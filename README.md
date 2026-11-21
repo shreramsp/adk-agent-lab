@@ -2,6 +2,14 @@
 
 End-to-end AI agents built with [Google ADK](https://google.github.io/adk-docs/), Gemini, and MCP.
 
+## ▶ Video walkthrough
+
+**[Watch on YouTube: code and live runs of all five agents (5 min)](https://youtu.be/qClSHyaOok4)**
+
+[![Video walkthrough of all five agents](https://img.youtube.com/vi/qClSHyaOok4/maxresdefault.jpg)](https://youtu.be/qClSHyaOok4)
+
+Chapters: [0:00 Intro](https://youtu.be/qClSHyaOok4?t=0) · [0:24 Lead Generator](https://youtu.be/qClSHyaOok4?t=24) · [1:20 Repo Explainer](https://youtu.be/qClSHyaOok4?t=80) · [2:06 Bug Assistant](https://youtu.be/qClSHyaOok4?t=126) · [3:02 Code Review](https://youtu.be/qClSHyaOok4?t=182) · [3:57 Shop Assistant](https://youtu.be/qClSHyaOok4?t=237)
+
 ## Agents
 
 | Agent | Description |
